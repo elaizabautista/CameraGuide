@@ -7,11 +7,11 @@ It contains **no AI, no detectors, no database and no login**. It only shows the
 ## What it does
 - **Live Cam** starts the camera; the picture is shown as the centre square, exactly like the scan screen (a checkbox switches that off to see the whole frame).
 - The face oval in the same position and proportions as the scan screen, with optional centre lines (horizontal = eye height, vertical = left / right).
-- **Smaller oval / Bigger oval** buttons (50% to 140%).
+- The oval is fixed at 105%.
 - **Snap Now** saves the picture that is on the screen to `Pictures\CameraGuide`, so a set-up can be kept for reference.
 - **File Upload** shows any picture inside the same frame and oval.
 - **Front / Left / Right** steps, the same as the scan screen. Touch a step to see its instruction.
-- Choose the camera and the picture size (default 640 × 480, as in the scan screen). The Logitech BRIO is chosen automatically if it is connected.
+- The **sharpest picture** the camera can give is used automatically (for example 1920 × 1080), or choose another size. Choose the camera in the same box; the one that worked last time is remembered, and a camera that sends no picture is skipped.
 - Zoom: pinch with two fingers, use the mouse wheel, or the + / − / reset buttons. Drag to move a zoomed picture. Zoom only changes what is shown.
 - Mirror the picture if that is easier to line up.
 - Works with touch and with mouse, in landscape and portrait.

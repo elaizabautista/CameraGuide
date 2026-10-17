@@ -27,6 +27,7 @@ namespace CameraGuide
     {
         // the same oval layout as the PrecisionSkin scan screen (fractions of the square picture)
         private const double CentreX = 0.50, CentreY = 0.50, RadiusX = 0.36, RadiusY = 0.46;
+        private const double OvalScale = 1.05;           // the oval is fixed at 105%
 
         private static readonly string[] StepName = { "Front view", "Left side", "Right side" };
         private static readonly string[] ViewName = { "Front", "Left", "Right" };
@@ -40,7 +41,6 @@ namespace CameraGuide
         private FilterInfoCollection _devices;
         private VideoCaptureDevice _source;
         private TouchZoom _zoom;
-        private double _ovalScale = 1.0;
         private int _step;
         private bool _ready;
         private bool _framePending;
@@ -56,6 +56,7 @@ namespace CameraGuide
         private bool _gotFrame, _loadingSizes;
         private int _autoTried;
         private List<VideoCapabilities> _caps = new List<VideoCapabilities>();
+        private bool _autoSize = true;                  // true = the sharpest picture the camera can give
 
         public MainWindow()
         {
@@ -129,6 +130,18 @@ namespace CameraGuide
             if (_source != null) StartCamera();          // switching camera while running restarts it
         }
 
+        /// <summary>The sharpest mode that still runs smoothly: the most pixels among the modes with at least 15 pictures per second (up to 4K).</summary>
+        private static VideoCapabilities BestMode(IList<VideoCapabilities> caps)
+        {
+            if (caps == null || caps.Count == 0) return null;
+            Func<VideoCapabilities, long> px = c => (long)c.FrameSize.Width * c.FrameSize.Height;
+            var usable = caps.Where(c => px(c) <= 3840L * 2160L).ToList();
+            if (usable.Count == 0) usable = caps.ToList();
+            var smooth = usable.Where(c => c.AverageFrameRate <= 0 || c.AverageFrameRate >= 15).ToList();
+            if (smooth.Count == 0) smooth = usable;
+            return smooth.OrderByDescending(px).ThenByDescending(c => c.AverageFrameRate).First();
+        }
+
         private void LoadSizes()
         {
             _caps = new List<VideoCapabilities>();
@@ -137,26 +150,23 @@ namespace CameraGuide
             {
                 var probe = new VideoCaptureDevice(_devices[CameraCombo.SelectedIndex].MonikerString);
                 if (probe.VideoCapabilities != null)
-                    _caps = probe.VideoCapabilities.GroupBy(c => c.FrameSize.Width + "x" + c.FrameSize.Height).Select(g => g.First())
-                                 .OrderBy(c => c.FrameSize.Width * c.FrameSize.Height).ToList();
+                    _caps = probe.VideoCapabilities.GroupBy(c => c.FrameSize.Width + "x" + c.FrameSize.Height).Select(g => g.OrderByDescending(c => c.AverageFrameRate).First())
+                                 .OrderByDescending(c => c.FrameSize.Width * c.FrameSize.Height).ToList();
             }
             catch { }
 
+            VideoCapabilities best = BestMode(_caps);
+            SizeCombo.Items.Add(best == null ? "Sharpest available" : "Sharpest available (" + best.FrameSize.Width + " × " + best.FrameSize.Height + ")");
             foreach (VideoCapabilities c in _caps) SizeCombo.Items.Add(c.FrameSize.Width + " × " + c.FrameSize.Height);
-            if (_caps.Count == 0) { SizeCombo.Items.Add("Automatic"); SizeCombo.SelectedIndex = 0; return; }
-
-            int best = 0, bestScore = int.MaxValue;
-            for (int i = 0; i < _caps.Count; i++)
-            {
-                int score = Math.Abs(_caps[i].FrameSize.Width - 640) + Math.Abs(_caps[i].FrameSize.Height - 480);
-                if (score < bestScore) { bestScore = score; best = i; }
-            }
-            SizeCombo.SelectedIndex = best;                // 640 x 480, like the scan screen
+            _autoSize = true;
+            SizeCombo.SelectedIndex = 0;
         }
 
         private void SizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_source != null && _ready && !_loadingSizes) StartCamera();
+            if (_loadingSizes || !_ready) return;
+            _autoSize = SizeCombo.SelectedIndex <= 0;
+            if (_source != null) StartCamera();
         }
 
         private void StartCamBtn_Click(object sender, RoutedEventArgs e)
@@ -195,8 +205,11 @@ namespace CameraGuide
             {
                 _uploaded = null;
                 _source = new VideoCaptureDevice(_devices[CameraCombo.SelectedIndex].MonikerString);
-                if (_caps.Count > 0 && SizeCombo.SelectedIndex >= 0 && SizeCombo.SelectedIndex < _caps.Count)
-                    _source.VideoResolution = _caps[SizeCombo.SelectedIndex];
+                if (_caps.Count > 0)
+                {
+                    VideoCapabilities mode = _autoSize ? BestMode(_caps) : _caps[Math.Max(0, Math.Min(_caps.Count - 1, SizeCombo.SelectedIndex - 1))];
+                    _source.VideoResolution = mode;
+                }
                 _source.NewFrame += OnNewFrame;
                 _source.VideoSourceError += (s, e) => Dispatcher.BeginInvoke(new Action(() => LiveStatusTxt.Text = "Camera problem: " + e.Description));
                 _frames = 0; _fpsStart = DateTime.UtcNow; _fps = 0; _gotFrame = false;
@@ -442,7 +455,7 @@ namespace CameraGuide
             System.Windows.Rect r = PictureRect();
             if (r.Width < 10 || r.Height < 10) return;
 
-            double rx = r.Width * RadiusX * _ovalScale, ry = r.Height * RadiusY * _ovalScale;
+            double rx = r.Width * RadiusX * OvalScale, ry = r.Height * RadiusY * OvalScale;
             double cx = r.X + r.Width * CentreX, cy = r.Y + r.Height * CentreY;
 
             GuideOval.Width = rx * 2; GuideOval.Height = ry * 2;
@@ -460,7 +473,6 @@ namespace CameraGuide
             GuideBanner.Visibility = pic && oval ? Visibility.Visible : Visibility.Collapsed;
             StateBanner.Visibility = pic && oval ? Visibility.Visible : Visibility.Collapsed;
             UploadedImageViewer.RenderTransform = MirrorChk.IsChecked == true ? new ScaleTransform(-1, 1) : Transform.Identity;
-            OvalSizeTxt.Text = "Oval size: " + (_ovalScale * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
         }
 
         private void Option_Changed(object sender, RoutedEventArgs e)
@@ -469,9 +481,6 @@ namespace CameraGuide
             UpdateOval();
             if (_uploaded != null) ShowUploaded();          // re-crop an uploaded picture
         }
-
-        private void OvalSmaller_Click(object sender, RoutedEventArgs e) { _ovalScale = Math.Max(0.5, _ovalScale - 0.05); UpdateOval(); }
-        private void OvalBigger_Click(object sender, RoutedEventArgs e) { _ovalScale = Math.Min(1.4, _ovalScale + 0.05); UpdateOval(); }
 
         // ------------------------------------------------------------------- zoom --
 
