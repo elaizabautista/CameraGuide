@@ -52,6 +52,9 @@ namespace CameraGuide
         private BitmapSource _lastShown;          // what is on the screen now (for Snap Now)
         private BitmapSource _uploaded;           // an uploaded picture, before cropping
         private DispatcherTimer _fpsTimer;
+        private DispatcherTimer _watchdog;          // a camera that sends no pictures is skipped
+        private bool _gotFrame, _loadingSizes;
+        private int _autoTried;
         private List<VideoCapabilities> _caps = new List<VideoCapabilities>();
 
         public MainWindow()
@@ -95,19 +98,34 @@ namespace CameraGuide
                 return;
             }
 
+            string remembered = LastCamera();
             int pick = 0;
             for (int i = 0; i < _devices.Count; i++)
             {
                 CameraCombo.Items.Add(_devices[i].Name);
-                if (_devices[i].Name.IndexOf("BRIO", StringComparison.OrdinalIgnoreCase) >= 0) pick = i;      // the study camera, when present
+                if (remembered != null && _devices[i].Name == remembered) pick = i;                              // the camera that worked last time
+                else if (remembered == null && _devices[i].Name.IndexOf("BRIO", StringComparison.OrdinalIgnoreCase) >= 0) pick = i;   // the study camera, when present
             }
             CameraCombo.SelectedIndex = pick;
+        }
+
+        private static string LastCameraFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CameraGuide", "last_camera.txt");
+
+        private static string LastCamera()
+        {
+            try { return File.Exists(LastCameraFile) ? File.ReadAllText(LastCameraFile).Trim() : null; } catch { return null; }
+        }
+
+        private static void RememberCamera(string name)
+        {
+            try { Directory.CreateDirectory(Path.GetDirectoryName(LastCameraFile)); File.WriteAllText(LastCameraFile, name ?? ""); } catch { }
         }
 
         private void CameraCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_devices == null || _devices.Count == 0 || CameraCombo.SelectedIndex < 0) return;
-            LoadSizes();
+            _loadingSizes = true;
+            try { LoadSizes(); } finally { _loadingSizes = false; }
             if (_source != null) StartCamera();          // switching camera while running restarts it
         }
 
@@ -138,12 +156,34 @@ namespace CameraGuide
 
         private void SizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_source != null && _ready) StartCamera();
+            if (_source != null && _ready && !_loadingSizes) StartCamera();
         }
 
         private void StartCamBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (_source != null) StopCamera(); else StartCamera();
+            if (_source != null) { StopCamera(); return; }
+            _autoTried = 0;
+            StartCamera();
+        }
+
+        /// <summary>Some cameras (for example an infrared camera) open but never send a picture: after 4 seconds try the next camera.</summary>
+        private void WatchdogTick(object sender, EventArgs e)
+        {
+            _watchdog.Stop();
+            if (_source == null || _gotFrame) return;
+
+            _autoTried++;
+            if (_devices != null && _autoTried < _devices.Count)
+            {
+                int next = (CameraCombo.SelectedIndex + 1) % _devices.Count;
+                LiveStatusTxt.Text = CameraCombo.SelectedItem + " sent no picture. Trying " + _devices[next].Name + " ...";
+                CameraCombo.SelectedIndex = next;          // restarts the camera on the next device
+                return;
+            }
+
+            StopCamera();
+            VerdictTxt.Text = "Status: no camera sent a picture.";
+            RegionTxt.Text = "Close any other program that is using the camera (Teams, Zoom, the Camera app, a browser tab), check the camera privacy switch, then press Live Cam again.";
         }
 
         private void StartCamera()
@@ -159,8 +199,11 @@ namespace CameraGuide
                     _source.VideoResolution = _caps[SizeCombo.SelectedIndex];
                 _source.NewFrame += OnNewFrame;
                 _source.VideoSourceError += (s, e) => Dispatcher.BeginInvoke(new Action(() => LiveStatusTxt.Text = "Camera problem: " + e.Description));
-                _frames = 0; _fpsStart = DateTime.UtcNow; _fps = 0;
+                _frames = 0; _fpsStart = DateTime.UtcNow; _fps = 0; _gotFrame = false;
                 _source.Start();
+
+                if (_watchdog == null) { _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) }; _watchdog.Tick += WatchdogTick; }
+                _watchdog.Stop(); _watchdog.Start();
 
                 StartCamBtn.Content = "⏹ Stop Cam";
                 SnapBtn.IsEnabled = true;
@@ -178,6 +221,7 @@ namespace CameraGuide
 
         private void StopCamera()
         {
+            if (_watchdog != null) _watchdog.Stop();
             VideoCaptureDevice s = _source;
             _source = null;
             if (s != null)
@@ -215,6 +259,7 @@ namespace CameraGuide
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (_source == null) { _framePending = false; return; }
+                if (!_gotFrame) { _gotFrame = true; RememberCamera(CameraCombo.SelectedItem as string); }
                 _lastShown = bmp;
                 UploadedImageViewer.Source = bmp;
                 _frames++;
