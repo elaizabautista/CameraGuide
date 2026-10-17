@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>CameraGuide</RootNamespace>
+    <AssemblyName>CameraGuide</AssemblyName>
+    <LangVersion>9.0</LangVersion>
+    <Prefer32Bit>false</Prefer32Bit>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <Reference Include="AForge"><HintPath>lib\AForge.dll</HintPath></Reference>
+    <Reference Include="AForge.Video"><HintPath>lib\AForge.Video.dll</HintPath></Reference>
+    <Reference Include="AForge.Video.DirectShow"><HintPath>lib\AForge.Video.DirectShow.dll</HintPath></Reference>
+  </ItemGroup>
+
+</Project>
