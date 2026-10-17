@@ -277,14 +277,20 @@ namespace CameraGuide
             int side = Math.Min(w, h);
             var rect = centreSquare && w != h ? new System.Drawing.Rectangle((w - side) / 2, (h - side) / 2, side, side)
                                               : new System.Drawing.Rectangle(0, 0, w, h);
-            BitmapData data = frame.LockBits(rect, ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-            try
+
+            // copy the wanted part into its own bitmap first, then read that whole bitmap
+            // (reading a sub-rectangle of the camera frame directly runs past the end of its memory on the last row)
+            using (Bitmap part = frame.Clone(rect, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
             {
-                var bs = BitmapSource.Create(rect.Width, rect.Height, 96, 96, PixelFormats.Bgr24, null, data.Scan0, data.Stride * rect.Height, data.Stride);
-                bs.Freeze();
-                return bs;
+                BitmapData data = part.LockBits(new System.Drawing.Rectangle(0, 0, part.Width, part.Height), ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                try
+                {
+                    var bs = BitmapSource.Create(part.Width, part.Height, 96, 96, PixelFormats.Bgr24, null, data.Scan0, data.Stride * part.Height, data.Stride);
+                    bs.Freeze();
+                    return bs;
+                }
+                finally { part.UnlockBits(data); }
             }
-            finally { frame.UnlockBits(data); }
         }
 
         private void UpdateInfo()
